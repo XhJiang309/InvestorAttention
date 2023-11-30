@@ -1,0 +1,166 @@
+
+Loading all the basic packages
+```{r}
+require(pacman) 
+pacman::p_load(pacman,plm,rethinking,dplyr,GGally,ggplot2,ggthemes,ggvis,httr,lubridate,plotly,rio,rmarkdown,shiny,stringr,tidyr,gplots,car,estimatr)
+```
+Loading data,removing companies with misleading names and declaring data to be panel
+```{r}
+data<-import("C:/Users/91875/Desktop/Sem 2/Finance/FM_Project_data_Final_v1.csv")
+data<-data[!(data$Company=="TEAM" | data$Company=="SIRI"| data$Company=="FB"| data$Company=="EBAY"),]
+
+data.p<-pdata.frame(data,index=c("Date","Company"))
+str(data)
+```
+
+
+Exploring Panel data
+```{r}
+plotmeans(R~Company,  main="Heterogeneity across stocks", data=data) 
+plotmeans(R~Date, main="Heterogeneity across weeks", data=data)
+```
+```{r}
+my_df <- data.frame(x = data$AGSVI, y = data$R, group = data$Company)
+
+ggplot(my_df, aes(x = x, y = y)) +
+  geom_point(aes(colour = group)) + # Points and color by group
+  scale_color_discrete("Groups") +  # Change legend title
+  xlab("AGSVI") +              # X-axis label
+  ylab("Return")  +             # Y-axis label
+  theme(axis.line = element_line(colour = "black", # Changes the default theme
+                                 size = 0.24))
+```
+
+```{r}
+my_df <- data.frame(x = data$AGSVI, y = data$R, group = data$Company)
+
+ggplot(my_df, aes(x = x, y = y)) +
+  geom_point(aes(colour = group)) + # Points and color by group
+  scale_color_discrete("Groups") +  # Change legend title
+  xlab("AGSVI") +              # X-axis label
+  ylab("Return")  +             # Y-axis label
+  theme(axis.line = element_line(colour = "black", # Changes the default theme
+                                 size = 0.24))
+```
+Running panel models
+
+1.Pooled OLS Regression
+a)Estimation happens through OLS
+b)similar to cross sectional analysis, basically ignoring the time-series aspect
+c)Assumption: Error variance is uniform across cross-sections
+
+
+Returns V/s AGSVI,lagged Return(just to see how AGSVI affect change in Returns from one week to another),Volatility(R^2) and a bunch of factors
+
+Model 1.a--> r(t,i)=alpha+beta_1*agsvi(t,i)+beta_2*r(t-1,i)+beta_3*r^2(t-1,i)+beta_4*Mkt_RF+beta_5*SMB+beta_6*HML+beta_7*RMW+beta_8*CMA+ε(t,i)
+
+```{r}
+model_1.a<-plm(R~R_lag1+AGSVI+Volatility+SMB+HML+RMW+CMA+Mkt_RF,data=data.p,model="pooling")
+summary(model_1.a)
+```
+
+
+Plotting the result
+```{r}
+plot(data$AGSVI, data$R, pch=19, xlab="AGSVI", ylab="R") 
+abline(plm(R~R_lag1+AGSVI+Volatility+SMB+HML+RMW+CMA+Mkt_RF,data=data.p,model="pooling"),lwd=3, col="red")
+```
+
+Volume traded V/s AGSVI, lagged Volume(just to see how agsvi affect volume change from one week to another),Volatility(R^2) and a bunch of factors
+
+Model 1.b--> volume(t,i)=alpha+beta_1*agsvi(t,i)+beta_2*volume(t-1,i)+beta_4*Mkt_RF+beta_5*SMB+beta_6*HML+beta_7*RMW+beta_8*CMA+ε(t,i)
+```{r}
+model_1.b<-plm(log(Volume)~log(Volume_lag1)+AGSVI+SMB+HML+RMW+CMA+Mkt_RF,data=data.p,model="pooling")
+summary(model_1.b)
+```
+2.Controlling for Stock fixed effects- Within model/Fixed Effects and Random effects model
+
+a)Treats the unobserved individual heterogeneity (alpha_i) for each stock to be correlated with explanatory variables.
+b)FE estimation involves a transformation to remove the unobserved effect alpha_i prior to estimation. On the time-demeaned eqn, OLS is applied.
+              
+              y(i,t)=beta_1*x(i,t)+alpha(i)+u(i,t)-->1
+              
+              On averaging this eqn over time
+              
+              y(i')=beta_1*x(i')+alpha(i)+u(i')-->2
+              
+             (y(i,t)-y(i'))=beta_1*(x(i,t)-x(i'))+u(i,t)-u(i')
+             
+c)Only focuses on variations within stocks. All differences between stocks are controlled for. Comparing single stock to itself at different periods of time.All time invariant variables vanish.
+d)The coefficient tells us how much returns changes in a week, on an average per stock, when agsvi is increased by 1 unit
+e)Errors won't be correlated over time
+f) For RE, we assume correlation(alpha(i),X(i))=0 
+g)Each individual stock has a different intercept, but we are not gona let it be whatever it wants to be. Its gonna follow normal dist.
+h) RE has more assumptions so small SE
+
+Returns V/s AGSVI,lagged Return(just to see how agsvi affect change in Returns from one week to another),Volatility(R^2) and a bunch of factors, but controlled for stock-fixed effects (k_i)
+
+Model 2.a/b--> r(t,i)=alpha+beta_1*agsvi(t,i)+beta_2*r(t-1,i)+beta_3*r^2(t-1,i)+beta_4*Mkt_RF+beta_5*SMB+beta_6*HML+beta_7*RMW+beta_8*CMA+k_i+ε(t,i)
+
+FE Model
+```{r}
+model_2.a<-plm(R~R_lag1+AGSVI+Volatility+SMB+HML+RMW+CMA+Mkt_RF,data=data.p,model="within")
+summary(model_2.a)
+```
+RE Model
+```{r}
+model_2.b<-plm(R~R_lag1+AGSVI+Volatility+SMB+HML+RMW+CMA+Mkt_RF,data=data.p,model="random")
+summary(model_2.b)
+```
+
+Run a Hausman test comparing fixed and random effects 
+
+```{r}
+phtest(model_2.a,model_2.b)
+```
+We favor FE model in this case 
+
+Volume V/s AGSVI,lagged Volume(just to see how agsvi affect change in Volume from one week to another),Volatility(R^2) and a bunch of factors, but controlled for stock-fixed effects (k_i)
+
+Model 2.c/d--> Volume(t,i)=alpha+beta_1*agsvi(t,i)+beta_2*Volume(t-1,i)+beta_4*Mkt_RF+beta_5*SMB+beta_6*HML+beta_7*RMW+beta_8*CMA+k_i+ε(t,i)
+
+```{r}
+model_2.c<-plm(log(Volume)~log(Volume_lag1)+AGSVI+SMB+HML+RMW+CMA+Mkt_RF,data=data.p,model="within")
+summary(model_2.c)
+```
+
+```{r}
+model_2.d<-plm(log(Volume)~log(Volume_lag1)+AGSVI+SMB+HML+RMW+CMA+Mkt_RF,data=data.p,model="random")
+summary(model_2.d)
+```
+Run a Hausman test comparing fixed and random effects 
+
+```{r}
+phtest(model_2.c,model_2.d)
+```
+We favor FE model in this case 
+
+3. Controlling for both stock (between) and time (within) fixed effects
+
+Returns V/s AGSVI,lagged Return(just to see how agsvi affect change in Returns from one week to another),Volatility(R^2) and a bunch of factors, but controlled for stock and time fixed effects (k(i) and v(t))
+                 
+                 r(t,i)=alpha+beta_1*agsvi(t,i)+beta_2*r(t-1,i)+beta_3*r^2(t-1,i)+beta_4*Mkt_RF+beta_5*SMB+beta_6*HML+beta_7*RMW+beta_8*                        CMA+v(t)+k(i)+ε_(t,i)
+ 
+```{r}
+model_3.a<-plm(R~R_lag1+AGSVI+Volatility+SMB+HML+RMW+CMA+Mkt_RF+factor(Date),data=data.p,model="within")
+summary(model_3.a)
+
+```
+Same model but using dummy variables (just to check if results are same)
+```{r}
+model_4.a<-lm(R~R_lag1+AGSVI+Volatility+SMB+HML+RMW+CMA+Mkt_RF+factor(Date)+factor(Company),data=data)
+summary(model_4.a)
+```
+
+Volume V/s AGSVI,lagged Volume(just to see how agsvi affect change in Returns from one week to another),Volatility(R^2) and a bunch of factors, but controlled for stock and time fixed effects (k(i) and v(t)) using Dummy variables
+                 
+                 Volume(t,i)=alpha+beta_1*agsvi(t,i)+beta_2*Volume(t-1,i)+beta_4*Mkt_RF+beta_5*SMB+beta_6*HML+beta_7*
+                             RMW+beta_8*CMA+v(t)+k(i)+ε_(t,i)
+
+
+ 
+```{r}
+model_3.b<-plm(log(Volume)~log(Volume_lag1)+AGSVI+SMB+HML+RMW+CMA+Mkt_RF+factor(Date),data=data.p,model="within")
+summary(model_3.c)
+
+```
